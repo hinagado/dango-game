@@ -39,6 +39,7 @@ const CONFIG = {
   stompBounce: 620,
   hurtKnock: 360,
   invincible: 1.4,
+  hearts: 3,          // ハートの数。敵に当たると1つ減り、0で旗からやり直し（ゲームオーバーなし）
   springSpeed: 1150,  // ぽよーん雲で跳ぶ強さ
   helpAfterFalls: 2,  // 同じ区間でこの回数落ちたら、たすけ雲が出る
   musicVolume: 0.5,   // 音楽の大きさ（0〜1）
@@ -114,7 +115,7 @@ const oneWayAt = (tx, ty) => tx >= 0 && tx < W && ty >= 0 && ty < H && grid[ty][
 const P = { x: 0, y: 0, w: 40, h: 40, vx: 0, vy: 0, onGround: false, face: 1,
   coyote: 0, buffer: 0, inv: 0, squash: 0, roll: 0 };
 let state = 'opening', openT = 0, camX = 0, got = 0, bigGot = 0, falls = 0, respawn, fade = 0, banner = 0, clearT = 0, time = 0;
-let trailT = 0, fireT = 0, helpCloud = null, selectT = 0;
+let hearts = 3, heartHit = 0, trailT = 0, fireT = 0, helpCloud = null, selectT = 0;
 const particles = [], popups = [];
 const popup = (x, y, text, color = '#4A8CC2', size = 30) => popups.push({ x, y, text, color, size, life: 1.2 });
 
@@ -193,7 +194,7 @@ function startCourse(i) {
   loadCourse(i);
   respawn = { ...startPos };
   placePlayer();
-  got = 0; bigGot = 0; falls = 0; camX = 0; banner = 2.6; clearT = 0; helpCloud = null;
+  got = 0; bigGot = 0; falls = 0; hearts = CONFIG.hearts; heartHit = 0; camX = 0; banner = 2.6; clearT = 0; helpCloud = null;
   particles.length = 0; popups.length = 0;
   pointers.clear(); refreshTouch();   // 前のコースで押したままの指を持ち越さない
   state = 'play';
@@ -374,6 +375,7 @@ function update(dt) {
   }
   if (state !== 'play') return;
   if (banner > 0) banner -= dt;
+  if (heartHit > 0) heartHit -= dt;
 
   // 左右
   const dir = (holdRight() ? 1 : 0) - (holdLeft() ? 1 : 0);
@@ -464,6 +466,7 @@ function update(dt) {
   // チェックポイント
   for (const c of checkpoints) if (!c.on && cx > c.x) {
     c.on = true; respawn = { x: c.x + 4, y: c.y + 4 }; falls = 0;
+    if (hearts < CONFIG.hearts) { hearts = CONFIG.hearts; popup(c.x + T / 2, c.y - 30, 'ハート かいふく！', '#FF6F9A', 26); }   // 旗でハートが元にもどる
     tone(semi(7), 0.12, 'triangle', 0.08); tone(semi(12), 0.2, 'triangle', 0.08, 0, 0.1);
   }
 
@@ -483,8 +486,14 @@ function update(dt) {
         popup(e.x + e.w / 2, e.y - 10, 'ぽよん', '#8C7BB0', 26);
         for (let i = 0; i < 8; i++) particles.push({ x: e.x + e.w / 2, y: e.y, vx: Math.cos(i) * 160, vy: -Math.abs(Math.sin(i)) * 200, life: 0.5, c: '#FFFFFF' });
       } else if (P.inv <= 0) {
-        P.inv = CONFIG.invincible;
-        P.vx = (cx < e.x + e.w / 2 ? -1 : 1) * CONFIG.hurtKnock; P.vy = -420; SFX.hurt();
+        hearts--; heartHit = 0.6; SFX.hurt();
+        if (hearts <= 0) {   // ハートが無くなったら旗からやり直し（集めたお星さまはそのまま）
+          placePlayer(); fade = 1; hearts = CONFIG.hearts; P.inv = CONFIG.invincible;
+          popup(P.x + P.w / 2, P.y - 30, 'もういちど！', '#FF6F9A', 30);
+        } else {
+          P.inv = CONFIG.invincible;
+          P.vx = (cx < e.x + e.w / 2 ? -1 : 1) * CONFIG.hurtKnock; P.vy = -420;
+        }
       }
     }
   }
@@ -950,6 +959,19 @@ function drawSelect() {
   }
   drawSoundButton();
 }
+function heart(x, y, r, full) {
+  ctx.save(); ctx.translate(x, y); ctx.beginPath();
+  ctx.moveTo(0, r * 0.95);
+  ctx.bezierCurveTo(-r * 1.4, r * 0.1, -r * 1.05, -r * 1.15, 0, -r * 0.45);
+  ctx.bezierCurveTo(r * 1.05, -r * 1.15, r * 1.4, r * 0.1, 0, r * 0.95);
+  ctx.closePath();
+  if (full) {
+    const g = ctx.createLinearGradient(0, -r, 0, r); g.addColorStop(0, '#FF9FB8'); g.addColorStop(1, '#F2647F');
+    ctx.fillStyle = g; ctx.fill(); ctx.strokeStyle = '#FFFFFF'; ctx.lineWidth = 3; ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.beginPath(); ctx.ellipse(-r * 0.42, -r * 0.42, r * 0.22, r * 0.14, -0.6, 0, 7); ctx.fill();
+  } else { ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.fill(); ctx.strokeStyle = '#E3B6C2'; ctx.lineWidth = 3; ctx.stroke(); }
+  ctx.restore();
+}
 function bigSlots(x, y, r) {
   for (let i = 0; i < bigStars.length; i++) {
     const sx = x + (i - (bigStars.length - 1) / 2) * r * 2.4;
@@ -1010,6 +1032,10 @@ function draw() {
   ctx.fillStyle = '#FFD84D'; star(54, 48, 22, 10); ctx.strokeStyle = '#F2B632'; ctx.lineWidth = 2.5; ctx.stroke();
   text(`${got} / ${totalStars}`, 150, 49, 34, '#3a3a4a');
   bigSlots(76, 104, 15);
+  for (let i = 0; i < CONFIG.hearts; i++) {   // ハート（減ったら少しゆれる）
+    const shake = heartHit > 0 && i === hearts ? Math.sin(heartHit * 60) * 4 : 0;
+    heart(262 + i * 50 + shake, 48, 19, i < hearts);
+  }
   for (const p of popups) { ctx.globalAlpha = Math.min(1, p.life * 2); text(p.text, p.x - camX, Math.max(p.size, p.y + oy), p.size, p.color); }
   ctx.globalAlpha = 1;
   drawSoundButton();
@@ -1110,7 +1136,7 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 // 試験用の窓口
-window.__game = { get state() { return state; }, get openT() { return openT; }, get P() { return P; }, get got() { return got; }, get total() { return totalStars; },
+window.__game = { get hearts() { return hearts; }, set hearts(v) { hearts = v; }, get state() { return state; }, get openT() { return openT; }, get P() { return P; }, get got() { return got; }, get total() { return totalStars; },
   get grid() { return grid; }, get enemies() { return enemies; }, get goal() { return goal; }, startCourse, T, keys, pressJump,
   get courseIdx() { return courseIdx; }, get unlocked() { return unlocked; }, count: COURSES.length,
   get bigGot() { return bigGot; }, get bigStars() { return bigStars; }, get muted() { return muted; },

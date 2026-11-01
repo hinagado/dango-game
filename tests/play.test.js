@@ -142,6 +142,22 @@ function installBot() {
     await tapGame(page, sx, 50); await wait(150);
     ok(m1 === !m0 && await page.evaluate(() => __game.muted) === m0, '右上のボタンで音を消せる・もどせる');
     ok(await page.evaluate(() => __game.musicOn), '遊んでいる間は音楽が流れる');
+    // ハート：敵に横から当たると1つ減る、0になると旗からやり直し（ゲームオーバーなし）
+    const bump = () => page.evaluate(async () => {
+      const g = __game, e = g.enemies.find(e => e.alive);
+      Object.assign(g.P, { x: 6 * 48 + 4, y: 13 * 48 - 40, vx: 0, vy: 0, inv: 0 });
+      Object.assign(e, { x: g.P.x + 20, y: g.P.y, vx: 0 });
+      await new Promise(f => setTimeout(f, 120));
+      e.x = 2000 * 48;   // 続けて当たらないよう遠くへ
+      return { hearts: g.hearts, x: g.P.x, state: g.state };
+    });
+    await page.evaluate(() => { __game.hearts = 3; });
+    const h1 = await bump();
+    ok(h1.hearts === 2 && h1.state === 'play', `敵に横から当たるとハートが1つ減る (3 → ${h1.hearts})`);
+    await page.screenshot({ path: path.join(SHOTS, '3b_hearts.png') });
+    await page.evaluate(() => { __game.hearts = 1; });
+    const h2 = await bump();
+    ok(h2.hearts === 3 && Math.abs(h2.x - (6 * 48 + 4)) > 100 && h2.state === 'play', `ハートが無くなると旗からやり直し・ハートは元にもどる（ゲームオーバーなし）`);
     // もどる
     await tapGame(page, (576 * W / H) - 196 + 52, 26 + 25); await wait(200);
     ok(await page.evaluate(() => __game.state === 'select' && !__game.musicOn), '「もどる」でコースを選ぶ画面にもどる');
