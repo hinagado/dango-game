@@ -158,6 +158,45 @@ function installBot() {
     await page.evaluate(() => { __game.hearts = 1; });
     const h2 = await bump();
     ok(h2.hearts === 3 && Math.abs(h2.x - (6 * 48 + 4)) > 100 && h2.state === 'play', `ハートが無くなると旗からやり直し・ハートは元にもどる（ゲームオーバーなし）`);
+
+    // 進化と武器：わたあめを取ると進化 → なげるボタンでお星さま → 敵を倒す。進化中に当たると元にもどる（ハートは減らない）
+    const itemCounts = await page.evaluate(() => { const n = []; for (let i = 0; i < __game.count; i++) { __game.startCourse(i); n.push(__game.items.length); } __game.startCourse(0); return n; });
+    ok(itemCounts.every(n => n === 2), `どのコースにも わたあめが2つある (${itemCounts.join(',')})`);
+    const pw = await page.evaluate(async () => {
+      const g = __game, it = g.items[0];
+      Object.assign(g.P, { x: it.x - 20, y: it.y - 20, vx: 0, vy: 0, inv: 0, power: false });
+      await new Promise(f => setTimeout(f, 100));
+      return { power: g.P.power, got: it.got };
+    });
+    ok(pw.power && pw.got, 'わたあめを取ると進化する');
+    await wait(300);
+    await page.screenshot({ path: path.join(SHOTS, '3c_power.png') });
+    const th = await page.evaluate(async () => {
+      const g = __game, e = g.enemies.find(e => e.alive);
+      // 平らな地面（1-1 の6マス目あたり）で、右に3マス先に敵を置く
+      Object.assign(g.P, { x: 6 * 48 + 4, y: 14 * 48 - 40, vx: 0, vy: 0, inv: 2, face: 1 });
+      Object.assign(e, { x: 9 * 48 + 4, y: 14 * 48 - 40, vx: 0 });
+      return { b: g.buttons().throw, i: g.enemies.indexOf(e) };
+    });
+    await wait(100);
+    await tapGame(page, th.b.x, th.b.y);
+    await wait(30);
+    const shotN = await page.evaluate(() => __game.shots.length);
+    await wait(700);
+    ok(shotN === 1, '進化すると「なげる」ボタンでお星さまをなげられる');
+    ok(await page.evaluate(i => !__game.enemies[i].alive, th.i), 'なげたお星さまが敵に当たると倒せる');
+    const dn = await page.evaluate(async () => {
+      const g = __game, e = g.enemies.find(e => e.alive);
+      g.hearts = 3;
+      Object.assign(g.P, { x: 6 * 48 + 4, y: 14 * 48 - 40, vx: 0, vy: 0, inv: 0 });
+      Object.assign(e, { x: g.P.x + 20, y: g.P.y, vx: 0 });
+      await new Promise(f => setTimeout(f, 120));
+      e.x = 2000 * 48;
+      return { power: g.P.power, hearts: g.hearts };
+    });
+    ok(!dn.power && dn.hearts === 3, '進化中に敵に当たると元の姿にもどる（ハートは減らない）');
+    await page.evaluate(() => __game.throwStar());
+    ok(await page.evaluate(() => __game.shots.length) === 0, '元の姿ではお星さまをなげられない');
     // もどる
     await tapGame(page, (576 * W / H) - 196 + 52, 26 + 25); await wait(200);
     ok(await page.evaluate(() => __game.state === 'select' && !__game.musicOn), '「もどる」でコースを選ぶ画面にもどる');
