@@ -16,7 +16,7 @@ const OUT = path.join(os.homedir(), 'OneDrive', 'デスクトップ', '副業', 
       const g = ctx.createLinearGradient(0, 0, 0, VH); g.addColorStop(0, '#BFE6FF'); g.addColorStop(1, '#EAF7FF');
       ctx.fillStyle = g; ctx.fillRect(0, 0, VW, VH);
       text('しんかした だんごくん　どれが いい？', VW / 2, 60, 40, '#4A8CC2');
-      const looks = [[null, 'いまの すがた', ''], ['pink', '①|わたあめピンク', 'いま これ'], ['rainbow', '②|にじの わ', ''], ['gold', '③|きんいろ', ''], ['crown', '④|ほしの かんむり', '']];
+      const looks = [[null, 'いまの すがた', ''], ['pink', '①|わたあめピンク', ''], ['rainbow', '②|にじの わ', ''], ['gold', '③|きんいろ', 'これに けってい'], ['crown', '④|ほしの かんむり', '']];
       const w = VW / looks.length;
       looks.forEach(([lk, name, note], i) => {
         const x = w * i + w / 2, y = 290;
