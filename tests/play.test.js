@@ -53,6 +53,15 @@ function installBot() {
     await page.evaluate(() => { try { localStorage.clear(); } catch (e) {} });
     await page.reload();
     await wait(600);
+    // オープニング：最後まで見ると自動でタイトルへ（速回し）、タップでもとばせる
+    ok(await page.evaluate(() => __game.state) === 'opening', 'はじめにオープニングが流れる');
+    await page.evaluate(() => { window.__timeScale = 8; });
+    await wait(2500);
+    await page.evaluate(() => { window.__timeScale = 1; });
+    ok(await page.evaluate(() => __game.state) === 'title', 'オープニングが終わると自動でタイトルになる');
+    await page.reload(); await wait(600);
+    await page.touchscreen.tap(590, 300); await wait(200);
+    ok(await page.evaluate(() => __game.state) === 'title', 'オープニングはタップでとばせる');
     await page.screenshot({ path: path.join(SHOTS, '1_title.png') });
     ok(await page.evaluate(() => __game.state) === 'title', 'タイトル画面が出る');
     ok(await page.evaluate(() => __game.count) === 15, 'コースが15ある');
@@ -179,6 +188,8 @@ function installBot() {
     await page.setViewport({ width: 820, height: 1180, hasTouch: true, isMobile: true });
     await wait(300);
     ok(await page.evaluate(() => getComputedStyle(document.getElementById('rotate')).display === 'flex'), '縦向きでは「よこにしてね」が出る');
+    const rot = await page.evaluate(() => document.getElementById('rotate').textContent);
+    ok(!rot.includes('iPad') && rot.includes('がめんを よこむきに'), '「よこにしてね」は iPad 以外でも通じる言い方');
 
     ok(errors.length === 0, 'エラーが出ない' + (errors.length ? ': ' + errors.join(' / ') : ''));
   } finally {

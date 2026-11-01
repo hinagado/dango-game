@@ -21,7 +21,7 @@
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="rotate">iPad を よこに してね<br>📱➡️</div>
+<div id="rotate">がめんを よこむきに してね<br><span style="font-size:.55em">よこに すると あそべるよ</span><br>📱➡️</div>
 <script>
 'use strict';
 // ===== 調整しやすい設定（速さ・ジャンプなど） =====
@@ -113,7 +113,7 @@ const oneWayAt = (tx, ty) => tx >= 0 && tx < W && ty >= 0 && ty < H && grid[ty][
 // ---------- 状態 ----------
 const P = { x: 0, y: 0, w: 40, h: 40, vx: 0, vy: 0, onGround: false, face: 1,
   coyote: 0, buffer: 0, inv: 0, squash: 0, roll: 0 };
-let state = 'title', camX = 0, got = 0, bigGot = 0, falls = 0, respawn, fade = 0, banner = 0, clearT = 0, time = 0;
+let state = 'opening', openT = 0, camX = 0, got = 0, bigGot = 0, falls = 0, respawn, fade = 0, banner = 0, clearT = 0, time = 0;
 let trailT = 0, fireT = 0, helpCloud = null, selectT = 0;
 const particles = [], popups = [];
 const popup = (x, y, text, color = '#4A8CC2', size = 30) => popups.push({ x, y, text, color, size, life: 1.2 });
@@ -289,6 +289,7 @@ const backButton = () => ({ x: VW - 196, y: 26, w: 104, h: 50 });
 const inRect = (p, r) => p && p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
 function goSelect() { state = 'select'; musicStop(); selectT = 0; }
 function tapAnywhere(p) {
+  if (state === 'opening') { state = 'title'; return true; }   // オープニングはタップでとばせる
   if (state === 'title') { goSelect(); return true; }
   if (state === 'select') {
     if (!p) { startCourse(Math.min(unlocked, COURSES.length) - 1); return true; }   // キーボードなら いちばん新しいコース
@@ -359,6 +360,7 @@ function update(dt) {
   }
   if (fade > 0) fade = Math.max(0, fade - dt * 2);
   if (state === 'select') selectT += dt;
+  if (state === 'opening') { openT += dt; if (openT >= OPENING_LEN) state = 'title'; }
   if (state === 'clear') {
     clearT += dt; fireT -= dt;
     if (fireT <= 0 && goal) {   // お祝いの星の花火
@@ -965,6 +967,7 @@ function text(s, x, y, size, color = '#3a3a4a', align = 'center', edge = '#fff')
 
 function draw() {
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  if (state === 'opening') { drawOpening(); return; }
   if (state === 'title') {
     camX = (time * 40) % 2000;
     drawSky(); drawTiles();
@@ -1039,6 +1042,64 @@ function draw() {
   }
 }
 
+// ---------- オープニング（おはなし。タップでとばせる） ----------
+const OPENING_LEN = 14;
+function groundY(px) {   // その横位置の地面の上（画面の座標）
+  const tx = Math.max(0, Math.floor(px / T));
+  for (let y = 0; y < H; y++) if ('#k='.includes(grid[y][tx])) return y * T + OY();
+  return VH - 2 * T;
+}
+function drawOpening() {
+  const t = openT, ease = k => k * k * (3 - 2 * k), clamp = k => Math.max(0, Math.min(1, k));
+  camX = 0;
+  drawSky(); drawTiles();
+  const dx = VW * 0.36, rx0 = VW * 0.56, gD = groundY(dx), gR = groundY(rx0);
+  // 雲が降りてきて、うさぎさんを乗せて空へ
+  const down = ease(clamp((t - 4.2) / 1.3)), up = ease(clamp((t - 6.4) / 2.6));
+  const cloudX = rx0, cloudY = -80 + (gR - 30 + 80) * down - (gR + 120) * up;
+  const onCloud = t > 5.9;
+  let rx = rx0, ry = gR, hop = Math.abs(Math.sin(t * 5)) * 14;
+  if (t > 5.4 && t <= 5.9) { const k = (t - 5.4) / 0.5; ry = gR - Math.sin(k * Math.PI) * 50 - (cloudY - 26 - gR) * -k; hop = 0; }
+  if (onCloud) { ry = cloudY - 26; hop = 0; }
+  if (t > 4.2) { ctx.fillStyle = '#FFFFFF'; puff(cloudX - 43 * 1.1, cloudY, 1.1); }
+  if (!onCloud) { ctx.fillStyle = 'rgba(40,50,90,.16)'; ctx.beginPath(); ctx.ellipse(rx, gR + 4, 28, 6, 0, 0, 7); ctx.fill(); }
+  drawRabbit(rx, ry, 0.62, hop);
+  // だんごくん（はじめは楽しく跳ねる → 見上げる → 最後は元気よく跳ぶ）
+  const dHop = t < 4.2 ? Math.abs(Math.sin(t * 5 + 1)) * 26 : t > 10 ? Math.abs(Math.sin(t * 6)) * 40 : 0;
+  groundShadow(dx, gD, 22);
+  drawDango(dx, gD - 26 - dHop, 26, 1, 0, Math.sin(t * 1.3) > 0.97);
+  // 吹き出し
+  if (t > 6 && t < 9.4) {
+    const bx = Math.max(16, rx - 440), by = Math.max(80, ry - 150);   // うさぎさんの左に出す（右上の音のボタンをかくさない）
+    ctx.globalAlpha = clamp((t - 6) * 3) * clamp((9.4 - t) * 3);
+    ctx.fillStyle = '#FFFFFF'; roundRect(bx, by, 380, 64, 32); ctx.fill();
+    text('くもの せかいで まってるね！', bx + 190, by + 33, 26, '#FF6F9A');
+    ctx.globalAlpha = 1;
+  }
+  // お星さまの道（上と右へ）
+  if (t > 9.4) for (let i = 0; i < 7; i++) {
+    const a = clamp((t - 9.4 - i * 0.22) * 4);
+    if (!a) continue;
+    const sx = dx + 80 + i * 58, sy = gD - 60 - i * 10;
+    ctx.globalAlpha = a; ctx.fillStyle = '#FFD84D'; star(sx, sy - Math.sin(t * 4 + i) * 4, 16 * (0.6 + 0.4 * a), 7);
+    ctx.strokeStyle = '#F2B632'; ctx.lineWidth = 2.5; ctx.stroke(); ctx.globalAlpha = 1;
+  }
+  // おはなしの文（場面ごとに入れかわる）
+  const lines = t < 4.2 ? ['ある ひ、だんごくんと うさぎさんは', 'そうげんで なかよく あそんでいました']
+    : t < 9.4 ? ['すると くもが おりてきて', 'うさぎさんを のせて おそらの うえへ']
+    : ['お星さまを あつめながら', 'くもの せかいへ しゅっぱつ！'];
+  const st = t < 4.2 ? 0 : t < 9.4 ? 4.2 : 9.4;
+  ctx.globalAlpha = clamp((t - st) * 2.5);
+  ctx.fillStyle = 'rgba(255,255,255,.72)'; const py = VH - 168;   // 文は下の土の所に出して、空の動きをかくさない
+  roundRect(VW / 2 - 330, py, 660, 118, 30); ctx.fill();
+  text(lines[0], VW / 2, py + 38, 34); text(lines[1], VW / 2, py + 82, 34);
+  ctx.globalAlpha = 1;
+  text('タップで とばす ▶▶', 24, 40, 22, '#6B7A8F', 'left');
+  // 最後は白くなってタイトルへ
+  if (t > OPENING_LEN - 1) { ctx.fillStyle = `rgba(255,255,255,${clamp(t - (OPENING_LEN - 1))})`; ctx.fillRect(0, 0, VW, VH); }
+  drawSoundButton();
+}
+
 let last = performance.now(), acc = 0;
 function frame(now) {
   acc += Math.min(0.1, (now - last) / 1000) * (window.__timeScale || 1); last = now;
@@ -1049,7 +1110,7 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 // 試験用の窓口
-window.__game = { get state() { return state; }, get P() { return P; }, get got() { return got; }, get total() { return totalStars; },
+window.__game = { get state() { return state; }, get openT() { return openT; }, get P() { return P; }, get got() { return got; }, get total() { return totalStars; },
   get grid() { return grid; }, get enemies() { return enemies; }, get goal() { return goal; }, startCourse, T, keys, pressJump,
   get courseIdx() { return courseIdx; }, get unlocked() { return unlocked; }, count: COURSES.length,
   get bigGot() { return bigGot; }, get bigStars() { return bigStars; }, get muted() { return muted; },
