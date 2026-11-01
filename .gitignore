@@ -1,2 +1,4 @@
 node_modules/
 tests/shots/
+tools/_a.py
+tools/_b.py
