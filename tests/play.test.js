@@ -22,7 +22,14 @@ function installBot() {
     const g = __game;
     if (!bot.on || g.state !== 'play') return;
     const P = g.P, T = 48, now = performance.now();
-    g.keys.ArrowRight = true;
+    g.keys.ArrowRight = true; g.keys.ArrowLeft = false;
+    // ボス戦：お星さまを持たせて、ボスの方を向いてなげ続ける
+    const B = g.boss;
+    if (B && B.active && B.alive) {
+      P.power = true; P.weapon = 'star';
+      if (B.x + B.w / 2 < P.x) { g.keys.ArrowRight = false; g.keys.ArrowLeft = true; }
+      if (now - (bot.thr || 0) > 300) { g.throwStar(); bot.thr = now; }
+    }
     const solid = (x, y) => g.grid[y] && '#=kBbJ'.includes(g.grid[y][x]);
     const oneway = (x, y) => g.grid[y] && g.grid[y][x] === '-';
     const fx = Math.floor((P.x + P.w + 20) / T), feet = Math.floor((P.y + P.h + 2) / T);
@@ -45,8 +52,11 @@ function installBot() {
   try {
     const page = await browser.newPage();
     const errors = [];
+    const gwait = ms => page.evaluate(ms => gw(ms), ms);   // ゲームの時間で待つ
     page.on('pageerror', e => errors.push(e.message));
     page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+    // ページの中で「ゲームの時間」で待つ（PCが重くてコマ落ちしても、ゲームの中の時間が進むまで待つ）
+    await page.evaluateOnNewDocument(() => { window.gw = ms => new Promise(r => { const t0 = time; const k = () => (time - t0 >= ms / 1000 ? r() : setTimeout(k, 16)); k(); }); });
     await page.setViewport({ width: W, height: H, deviceScaleFactor: 1, hasTouch: true, isMobile: true, isLandscape: true });   // iPad Air の横画面
     // GAME_URL を付けると公開ページで試す
     await page.goto(process.env.GAME_URL || 'file:///' + path.join(__dirname, '..', 'index.html').replace(/\\/g, '/'));
@@ -86,7 +96,7 @@ function installBot() {
     await page.touchscreen.tap(W - 100, H - 90); await wait(150);
     const y1 = await page.evaluate(() => __game.P.y);
     ok(y1 < y0 - 10, `ジャンプボタン（タッチ）で跳ぶ (${Math.round(y0)} → ${Math.round(y1)})`);
-    await wait(800);
+    await gwait(800);
 
     // 右ボタンを押したまま「離した」の知らせが来なくても、指が無くなれば止まる（iPad で勝手に右へ動いた不具合）
     const stuck = await page.evaluate(async () => {
@@ -94,12 +104,12 @@ function installBot() {
       const ev = (type, x, y) => cv.dispatchEvent(new PointerEvent(type, { pointerId: 77, pointerType: 'touch', clientX: r.left + x * s, clientY: r.top + y * s, bubbles: true }));
       const before = __game.P.x;
       ev('pointerdown', 245, 576 - 100);
-      await new Promise(f => setTimeout(f, 300));
+      await gw(300);
       const moved = __game.P.x - before;
       window.dispatchEvent(new TouchEvent('touchend', { touches: [], bubbles: true }));   // pointerup は送らない
-      await new Promise(f => setTimeout(f, 600));
+      await gw(600);
       const x1 = __game.P.x;
-      await new Promise(f => setTimeout(f, 400));
+      await gw(400);
       return { moved, x1, x2: __game.P.x };
     });
     ok(stuck.moved > 20 && Math.abs(stuck.x2 - stuck.x1) < 1, `「離した」の知らせが来なくても勝手に右へ動き続けない (${Math.round(stuck.x1)} → ${Math.round(stuck.x2)})`);
@@ -108,7 +118,7 @@ function installBot() {
       const cv = document.querySelector('canvas'), r = cv.getBoundingClientRect(), s = r.height / 576;
       const x0 = __game.P.x;
       cv.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 78, pointerType: 'touch', clientX: r.left + 250 * s, clientY: r.top + 200 * s, bubbles: true }));
-      await new Promise(f => setTimeout(f, 400));
+      await gw(400);
       const x1 = __game.P.x;
       cv.dispatchEvent(new PointerEvent('pointerup', { pointerId: 78, pointerType: 'touch', bubbles: true }));
       return { x0, x1 };
@@ -117,9 +127,9 @@ function installBot() {
 
     // 仕掛け：だんごくんを置いて確かめる（1-1）
     const place = (tx, y) => page.evaluate((tx, y) => Object.assign(__game.P, { x: tx * 48 + 4, y, vx: 0, vy: 0, inv: 0 }), tx, y);
-    await place(11, 14 * 48 - 40); await wait(100);
+    await place(11, 14 * 48 - 40); await gwait(100);
     const g0 = await page.evaluate(() => __game.got);
-    await page.keyboard.down('Space'); await wait(350); await page.keyboard.up('Space'); await wait(400);
+    await page.keyboard.down('Space'); await gwait(350); await page.keyboard.up('Space'); await gwait(400);
     const blk = await page.evaluate(() => ({ t: __game.grid[11][11], got: __game.got }));
     ok(blk.t === 'b' && blk.got === g0 + 1, `星のブロックをたたくとお星さまが出る (${g0} → ${blk.got})`);
     await place(24, 13 * 48 - 42);
@@ -133,13 +143,13 @@ function installBot() {
     for (let i = 0; i < 30; i++) { const q = await page.evaluate(() => ({ vy: __game.P.vy, x: __game.P.x })); if (q.vy < -600) up = true; xs.push(q.x); await wait(30); }
     ok(up && xs.every(x => Math.abs(x - (20 * 48 + 4)) < 5), 'たすけ雲が穴から押し上げてくれる（最初に戻されない）');
     await page.evaluate(() => { __game.falls = 0; });
-    await place(20, 12 * 48); await wait(1200);
+    await place(20, 12 * 48); await gwait(1200);
     ok(await page.evaluate(() => __game.P.x < 20 * 48 - 100 && __game.falls === 1), 'たすけ雲が出る前は、落ちると旗（最初）に戻る');
     const m0 = await page.evaluate(() => __game.muted);
     const sx = (576 * W / H) - 56;
-    await tapGame(page, sx, 50); await wait(150);
+    await tapGame(page, sx, 50); await gwait(150);
     const m1 = await page.evaluate(() => __game.muted);
-    await tapGame(page, sx, 50); await wait(150);
+    await tapGame(page, sx, 50); await gwait(150);
     ok(m1 === !m0 && await page.evaluate(() => __game.muted) === m0, '右上のボタンで音を消せる・もどせる');
     ok(await page.evaluate(() => __game.musicOn), '遊んでいる間は音楽が流れる');
     // ハート：敵に横から当たると1つ減る、0になると旗からやり直し（ゲームオーバーなし）
@@ -147,7 +157,7 @@ function installBot() {
       const g = __game, e = g.enemies.find(e => e.alive);
       Object.assign(g.P, { x: 6 * 48 + 4, y: 13 * 48 - 40, vx: 0, vy: 0, inv: 0 });
       Object.assign(e, { x: g.P.x + 20, y: g.P.y, vx: 0 });
-      await new Promise(f => setTimeout(f, 120));
+      await gw(120);
       e.x = 2000 * 48;   // 続けて当たらないよう遠くへ
       return { hearts: g.hearts, x: g.P.x, state: g.state };
     });
@@ -171,24 +181,63 @@ function installBot() {
         const e = g.enemies[0];
         Object.assign(g.P, { x: 6 * 48 + 4, y: 14 * 48 - 40, vx: 0, vy: 0, inv: 5, face: 1, power: true, weapon: w });
         Object.assign(e, { x: 9 * 48 + 4, y: 14 * 48 - 40, vx: 0 });
-        await new Promise(f => setTimeout(f, 80));
+        await gw(80);
         g.throwStar();
         const n = g.shots.length;
-        await new Promise(f => setTimeout(f, 1500));
+        await gw(1500);
         return { n, dead: !e.alive, left: g.shots.length };
       }, w);
       ok(r.n === 1 && r.dead, `武器「${w}」で敵を倒せる`);
       if (w === 'boomerang') ok(r.left === 0, 'ブーメランは もどってきて消える');
     }
+    // 敵の種類とボス
+    const ek = await page.evaluate(() => { const k = new Set(); for (let i = 0; i < __game.count; i++) { __game.startCourse(i); __game.enemies.forEach(e => k.add(e.kind)); } return [...k]; });
+    ok(ek.length === 4, `敵は4種類 出てくる (${ek.join(',')})`);
+    const bk = await page.evaluate(() => { const r = []; for (let i = 0; i < __game.count; i++) { __game.startCourse(i); r.push(__game.boss ? __game.boss.kind : '-'); } return r; });
+    ok(bk.every(k => k !== '-') && new Set(bk).size === 5, `どのコースにもボスがいる・ボスは5種類 (${[...new Set(bk)].join(',')})`);
+    const wall = await page.evaluate(async () => {
+      const g = __game; g.startCourse(0);
+      Object.assign(g.P, { x: g.goal.x - 48, y: 13 * 48 - 40, vx: 0, vy: 0, inv: 5 });   // ゴールの手前へ飛ばしても
+      await gw(200);
+      return { x: g.P.x, right: g.boss.right, state: g.state };
+    });
+    ok(wall.x + 40 <= wall.right + 1 && wall.state === 'play', 'ボスを倒すまでゴールへは進めない');
+    const stomp = await page.evaluate(async () => {
+      const g = __game; g.startCourse(0);
+      const B = g.boss; B.active = true;
+      const hp0 = B.hp;
+      Object.assign(g.P, { x: B.x + B.w / 2 - 20, y: B.y - 70, vx: 0, vy: 300, inv: 0 });
+      await gw(250);
+      return { hp0, hp: B.hp };
+    });
+    ok(stomp.hp === stomp.hp0 - 1, `ボスは上から踏むと体力が減る (${stomp.hp0} → ${stomp.hp})`);
+    for (const ci of [0, 3, 6, 9, 12]) {   // 5種類のボスを、お星さまを投げて倒せるか
+      const r = await page.evaluate(async ci => {
+        const g = __game; g.startCourse(ci);
+        const B = g.boss;
+        Object.assign(g.P, { x: B.left + 48, y: B.groundY - 44, vx: 0, vy: 0, inv: 0, power: true, weapon: 'star', face: 1 });
+        const t0 = performance.now();
+        while (B.alive && performance.now() - t0 < 30000) {
+          g.P.power = true; g.P.inv = 1; g.hearts = 3;
+          g.P.face = Math.sign(B.x + B.w / 2 - (g.P.x + 20)) || 1;
+          if (Math.abs(B.x + B.w / 2 - g.P.x) < 90) g.P.x = B.left + 8;   // 近すぎたら離れる
+          g.throwStar();
+          await gw(120);
+        }
+        return { kind: B.kind, dead: !B.alive, sec: Math.round((performance.now() - t0) / 1000) };
+      }, ci);
+      ok(r.dead, `ボス「${r.kind}」を倒せる（${r.sec}秒）`);
+      if (ci === 9) await page.screenshot({ path: path.join(SHOTS, '3d_boss.png') });
+    }
     await page.evaluate(() => { __game.startCourse(0); __game.P.power = false; });
     const pw = await page.evaluate(async () => {
       const g = __game, it = g.items[0];
       Object.assign(g.P, { x: it.x - 20, y: it.y - 20, vx: 0, vy: 0, inv: 0, power: false });
-      await new Promise(f => setTimeout(f, 100));
+      await gw(100);
       return { power: g.P.power, got: it.got };
     });
     ok(pw.power && pw.got, 'アイテムを取ると進化する');
-    await wait(300);
+    await gwait(300);
     await page.screenshot({ path: path.join(SHOTS, '3c_power.png') });
     const th = await page.evaluate(async () => {
       const g = __game, e = g.enemies.find(e => e.alive);
@@ -197,11 +246,11 @@ function installBot() {
       Object.assign(e, { x: 9 * 48 + 4, y: 14 * 48 - 40, vx: 0 });
       return { b: g.buttons().throw, i: g.enemies.indexOf(e) };
     });
-    await wait(100);
+    await gwait(100);
     await tapGame(page, th.b.x, th.b.y);
-    await wait(30);
+    await gwait(30);
     const shotN = await page.evaluate(() => __game.shots.length);
-    await wait(700);
+    await gwait(700);
     ok(shotN === 1, '進化すると「なげる」ボタンでお星さまをなげられる');
     ok(await page.evaluate(i => !__game.enemies[i].alive, th.i), 'なげたお星さまが敵に当たると倒せる');
     const dn = await page.evaluate(async () => {
@@ -209,7 +258,7 @@ function installBot() {
       g.hearts = 3;
       Object.assign(g.P, { x: 6 * 48 + 4, y: 14 * 48 - 40, vx: 0, vy: 0, inv: 0 });
       Object.assign(e, { x: g.P.x + 20, y: g.P.y, vx: 0 });
-      await new Promise(f => setTimeout(f, 120));
+      await gw(120);
       e.x = 2000 * 48;
       return { power: g.P.power, hearts: g.hearts };
     });
@@ -217,7 +266,7 @@ function installBot() {
     await page.evaluate(() => __game.throwStar());
     ok(await page.evaluate(() => __game.shots.length) === 0, '元の姿ではお星さまをなげられない');
     // もどる
-    await tapGame(page, (576 * W / H) - 196 + 52, 26 + 25); await wait(200);
+    await tapGame(page, (576 * W / H) - 196 + 52, 26 + 25); await gwait(200);
     ok(await page.evaluate(() => __game.state === 'select' && !__game.musicOn), '「もどる」でコースを選ぶ画面にもどる');
 
     // 15コースを自動操作で
@@ -234,33 +283,33 @@ function installBot() {
         await wait(250);
       }
       const r = await page.evaluate(() => ({ state: __game.state, falls: __bot.falls, got: __game.got, total: __game.total, big: __game.bigGot, x: Math.round(__game.P.x / 48) }));
-      await page.evaluate(() => { __bot.on = false; __game.keys.ArrowRight = false; __game.keys.Space = false; });
+      await page.evaluate(() => { __bot.on = false; __game.keys.ArrowRight = false; __game.keys.ArrowLeft = false; __game.keys.Space = false; });
       results.push(r);
       const id = `${Math.floor(i / 3) + 1}-${i % 3 + 1}`;
       ok(r.state === 'clear', `${id} 自動操作でゴールできる（落ちた ${r.falls}回、お星さま ${r.got}/${r.total}、おおきな ${r.big}/3、${Math.round((Date.now() - t0) / 1000)}秒）${r.state === 'clear' ? '' : ' 止まった所 ' + r.x + 'マス目'}`);
-      if (i === 0) { await wait(1500); await page.screenshot({ path: path.join(SHOTS, '4_goal.png') }); }
+      if (i === 0) { await gwait(1500); await page.screenshot({ path: path.join(SHOTS, '4_goal.png') }); }
     }
     await page.evaluate(() => { window.__timeScale = 1; });
     ok(await page.evaluate(() => __game.unlocked) === 15, 'クリアするたびに次のコースが開く（15コースぜんぶ開いた）');
 
     // ゴール後の「つぎへ」
     await page.evaluate(() => __game.startCourse(3));
-    await page.evaluate(() => { const g = __game; g.P.x = g.goal.x; });
-    await wait(1800);
+    await page.evaluate(() => { const g = __game; if (g.boss) g.boss.alive = false; g.P.x = g.goal.x; });
+    await gwait(1800);
     await page.screenshot({ path: path.join(SHOTS, '5_clear_buttons.png') });
     const vw = 576 * W / H, bw = 230, gap = 20, bx0 = (vw - (3 * bw + 2 * gap)) / 2;
-    await tapGame(page, bx0 + bw / 2, 576 * 0.86 + 33); await wait(300);
+    await tapGame(page, bx0 + bw / 2, 576 * 0.86 + 33); await gwait(300);
     ok(await page.evaluate(() => __game.state === 'play' && __game.courseIdx === 4), 'ゴール後「つぎへ」で次のコースへ');
     await page.evaluate(() => __game.startCourse(4));
-    await page.evaluate(() => { const g = __game; g.P.x = g.goal.x; });
-    await wait(1800);
-    await tapGame(page, bx0 + bw * 1.5 + gap, 576 * 0.86 + 33); await wait(300);
+    await page.evaluate(() => { const g = __game; if (g.boss) g.boss.alive = false; g.P.x = g.goal.x; });
+    await gwait(1800);
+    await tapGame(page, bx0 + bw * 1.5 + gap, 576 * 0.86 + 33); await gwait(300);
     ok(await page.evaluate(() => __game.state) === 'select', 'ゴール後「コースを えらぶ」で選ぶ画面へ');
     await page.screenshot({ path: path.join(SHOTS, '6_select_all.png') });
 
     // 縦向き
     await page.setViewport({ width: 820, height: 1180, hasTouch: true, isMobile: true });
-    await wait(300);
+    await gwait(300);
     ok(await page.evaluate(() => getComputedStyle(document.getElementById('rotate')).display === 'flex'), '縦向きでは「よこにしてね」が出る');
     const rot = await page.evaluate(() => document.getElementById('rotate').textContent);
     ok(!rot.includes('iPad') && rot.includes('がめんを よこむきに'), '「よこにしてね」は iPad 以外でも通じる言い方');

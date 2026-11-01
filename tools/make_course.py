@@ -64,7 +64,11 @@ def course_1_1():
     put(106, 13, 'J'); put(106, 10, '*'); put(106, 9, '*'); put(106, 8, '*')
     put(116, 13, 'G')
     for r in range(9, 14): put(127, r, 'k')
-    return c.rows()
+    rows = c.rows()
+    # ボスの広場：100マス目（ふつうの地面）のうしろに平らな18マスを差しこむ。X はボスの立つ所
+    arena = ['#' * 18 if r >= 14 else '.' * 18 for r in range(H)]
+    arena[13] = '.' * 13 + 'X' + '.' * 4
+    return [r[:101] + a + r[101:] for r, a in zip(rows, arena)]
 
 
 def generate(level, idx, seed):
@@ -72,7 +76,7 @@ def generate(level, idx, seed):
     rnd = random.Random(seed)
     d = level + idx * 0.3                         # むずかしさ（1.0〜5.6）
     length = int(110 + level * 12 + idx * 6)
-    c = Course(length + 40)
+    c = Course(length + 70)
     x, h = 0, 0
     big_left = 3
     enemy_speed_note = None
@@ -201,6 +205,11 @@ def generate(level, idx, seed):
     # おおきなお星さまが3つにならなかったら、ぽよーん雲を足して置く
     while big_left:
         seg_spring()
+    # ボスの広場：平らな18マス。X はボスの立つ所（右から5マス目）
+    flat(2, stars=False)
+    bx0 = x
+    flat(18, stars=False)
+    c.put(bx0 + 13, surf(h) - 1, 'X')
     # ゴール：雲の世界でうさぎさん
     h_goal = 0
     flat(2, stars=False)
@@ -236,7 +245,7 @@ def main():
     with open(os.path.join(here, '..', 'courses.js'), 'w', encoding='utf-8', newline='\n') as f:
         f.write('// tools/make_course.py が作るファイル。手で直さない\n')
         f.write('// # 地面  = ブロック  B 星のブロック  - 雲  k 雲の地面  J ぽよーん雲  * お星さま\n')
-        f.write('// O おおきなお星さま  e 敵（仮）  C チェックポイント  S スタート  G うさぎさん\n')
+        f.write('// O おおきなお星さま  e 敵  C チェックポイント  S スタート  G うさぎさん\n')
         f.write('const COURSES = [\n')
         for co in out:
             f.write('  { id: %s, level: %d, theme: %s, name: %s, map: [\n' % (
