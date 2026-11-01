@@ -195,6 +195,7 @@ function startCourse(i) {
   placePlayer();
   got = 0; bigGot = 0; falls = 0; camX = 0; banner = 2.6; clearT = 0; helpCloud = null;
   particles.length = 0; popups.length = 0;
+  pointers.clear(); refreshTouch();   // 前のコースで押したままの指を持ち越さない
   state = 'play';
   musicStart();
 }
@@ -227,6 +228,8 @@ function whichButton(p) {
     if (d < b[k].r * 1.35) return k;
   }
   // 左半分の空いた所は左右、右半分はジャンプとして受ける（小さい手でも押しやすく）
+  // 上半分は受けない（iPad を持つ手や手のひらが触れて勝手に動かないように）
+  if (p.y < VH * 0.5) return null;
   if (p.x < VW * 0.35) return p.x < b.left.x + 75 ? 'left' : 'right';
   if (p.x > VW * 0.6) return 'jump';
   return null;
@@ -245,6 +248,7 @@ cv.addEventListener('pointerdown', e => {
   if (tapAnywhere(lp)) return;
   const k = whichButton(lp);
   pointers.set(e.pointerId, k);
+  try { cv.setPointerCapture(e.pointerId); } catch (err) {}
   if (k === 'jump') pressJump();
   refreshTouch();
 });
@@ -259,6 +263,13 @@ cv.addEventListener('pointermove', e => {
 const release = e => { pointers.delete(e.pointerId); refreshTouch(); };
 cv.addEventListener('pointerup', release);
 cv.addEventListener('pointercancel', release);
+cv.addEventListener('lostpointercapture', release);
+// iPad では「離した」の知らせが来ないことがあるので、指が1本も無くなったら全部離したことにする
+function releaseAll() { pointers.clear(); refreshTouch(); for (const k in keys) keys[k] = false; }
+addEventListener('touchend', e => { if (e.touches.length === 0) { pointers.clear(); refreshTouch(); } });
+addEventListener('touchcancel', e => { if (e.touches.length === 0) { pointers.clear(); refreshTouch(); } });
+addEventListener('blur', releaseAll);
+document.addEventListener('visibilitychange', () => { if (document.hidden) releaseAll(); });
 document.addEventListener('gesturestart', e => e.preventDefault());
 
 function pressJump() { P.buffer = CONFIG.jumpBuffer; }

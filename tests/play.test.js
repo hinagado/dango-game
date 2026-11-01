@@ -79,6 +79,33 @@ function installBot() {
     ok(y1 < y0 - 10, `ジャンプボタン（タッチ）で跳ぶ (${Math.round(y0)} → ${Math.round(y1)})`);
     await wait(800);
 
+    // 右ボタンを押したまま「離した」の知らせが来なくても、指が無くなれば止まる（iPad で勝手に右へ動いた不具合）
+    const stuck = await page.evaluate(async () => {
+      const cv = document.querySelector('canvas'), r = cv.getBoundingClientRect(), s = r.height / 576;
+      const ev = (type, x, y) => cv.dispatchEvent(new PointerEvent(type, { pointerId: 77, pointerType: 'touch', clientX: r.left + x * s, clientY: r.top + y * s, bubbles: true }));
+      const before = __game.P.x;
+      ev('pointerdown', 245, 576 - 100);
+      await new Promise(f => setTimeout(f, 300));
+      const moved = __game.P.x - before;
+      window.dispatchEvent(new TouchEvent('touchend', { touches: [], bubbles: true }));   // pointerup は送らない
+      await new Promise(f => setTimeout(f, 600));
+      const x1 = __game.P.x;
+      await new Promise(f => setTimeout(f, 400));
+      return { moved, x1, x2: __game.P.x };
+    });
+    ok(stuck.moved > 20 && Math.abs(stuck.x2 - stuck.x1) < 1, `「離した」の知らせが来なくても勝手に右へ動き続けない (${Math.round(stuck.x1)} → ${Math.round(stuck.x2)})`);
+    // 上半分を触っても動かない（持つ手が触れたとき）
+    const top = await page.evaluate(async () => {
+      const cv = document.querySelector('canvas'), r = cv.getBoundingClientRect(), s = r.height / 576;
+      const x0 = __game.P.x;
+      cv.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 78, pointerType: 'touch', clientX: r.left + 250 * s, clientY: r.top + 200 * s, bubbles: true }));
+      await new Promise(f => setTimeout(f, 400));
+      const x1 = __game.P.x;
+      cv.dispatchEvent(new PointerEvent('pointerup', { pointerId: 78, pointerType: 'touch', bubbles: true }));
+      return { x0, x1 };
+    });
+    ok(Math.abs(top.x1 - top.x0) < 1, `画面の上半分に手が触れても動かない (${Math.round(top.x0)} → ${Math.round(top.x1)})`);
+
     // 仕掛け：だんごくんを置いて確かめる（1-1）
     const place = (tx, y) => page.evaluate((tx, y) => Object.assign(__game.P, { x: tx * 48 + 4, y, vx: 0, vy: 0, inv: 0 }), tx, y);
     await place(11, 14 * 48 - 40); await wait(100);
