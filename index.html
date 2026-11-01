@@ -78,7 +78,15 @@ resize();
 
 // ---------- コースの読み込み ----------
 let grid, W, H, stars, bigStars, enemies, checkpoints, startPos, goal, totalStars;
-let items = [], shots = [], throwCool = 0, powerHint = false;   // わたあめ（進化のアイテム）・なげたお星さま
+let items = [], shots = [], throwCool = 0, powerHint = false;
+// 武器の種類。アイテムを取ると、その武器を持って進化する
+const WEAPONS = [
+  { id: 'star',     name: 'お星さま',     max: 2, color: '#FFD84D' },   // はずみながら進む
+  { id: 'bubble',   name: 'しゃぼんだま', max: 3, color: '#9FD8FF' },   // ゆっくり ふわふわ。つつんで飛ばす
+  { id: 'wataame',  name: 'わたあめ',     max: 1, color: '#FFB3CF' },   // 山なりに投げて、落ちた所の まわりの敵を まとめて
+  { id: 'boomerang', name: 'ブーメラン',  max: 1, color: '#B9E8A0' },   // 行って もどってくる。とちゅうの敵を ぜんぶ
+];
+const weaponOf = id => WEAPONS.find(w => w.id === id) || WEAPONS[0];   // わたあめ（進化のアイテム）・なげたお星さま
 let courseIdx = 0, course = COURSES[0], theme = THEMES.grass;
 const bump = {};   // たたいた・踏んだタイルのゆれ
 function loadCourse(i = courseIdx) {
@@ -105,18 +113,19 @@ function loadCourse(i = courseIdx) {
   totalStars = stars.length + rows.join('').split('B').length - 1;
   // わたあめ：コースの2割と6割あたりの、上が空いている平らな地面の上に1つずつ置く
   items = []; shots = [];
-  for (const f of [0.22, 0.6]) {
-    for (let x = Math.floor(W * f); x < W - 30; x++) {
+  [0.2, 0.45, 0.7].forEach((f, n) => {
+    const kind = WEAPONS[(i + n) % WEAPONS.length].id;   // コースごとに出る武器の順番をずらす
+    for (let x = Math.floor(W * f); x < W - 16; x++) {
       let top = -1;
       for (let y = 2; y < H; y++) if ('#k='.includes(grid[y][x])) { top = y; break; }
       if (top < 6) continue;
       const cx = x * T + T / 2, cy = (top - 2) * T + T / 2;
       const free = [1, 2, 3, 4].every(d => grid[top - d][x] === '.' && grid[top - d][x - 1] === '.' && grid[top - d][x + 1] === '.')
         && !stars.some(s => Math.abs(s.x - cx) < T && Math.abs(s.y - cy) < T * 1.5)
-        && !enemies.some(e => Math.abs(e.x - x * T) < 4 * T);
-      if (free) { items.push({ x: cx, y: cy, got: false, t: 0 }); break; }
+        && !enemies.some(e => Math.abs(e.x - x * T) < 4 * T) && !items.some(o => Math.abs(o.x - cx) < 8 * T);
+      if (free) { items.push({ x: cx, y: cy, got: false, t: 0, kind }); break; }
     }
-  }
+  });
 }
 loadCourse(0);
 const solidAt = (tx, ty) => {
@@ -297,15 +306,27 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) relea
 document.addEventListener('gesturestart', e => e.preventDefault());
 
 function pressJump() { P.buffer = CONFIG.jumpBuffer; }
-function throwStar() {   // 進化しているときだけ、向いている方へお星さまをなげる（同時に2つまで）
-  if (state !== 'play' || !P.power || throwCool > 0 || shots.length >= 2) return;
+function throwStar() {   // 進化しているときだけ、持っている武器を向いている方へなげる
+  const w = weaponOf(P.weapon);
+  if (state !== 'play' || !P.power || throwCool > 0 || shots.length >= w.max) return;
   throwCool = 0.25; SFX.throw();
-  shots.push({ x: P.x + P.w / 2 + P.face * 18, y: P.y + P.h / 2 - 4, vx: P.face * CONFIG.throwSpeed, vy: -180, life: 1.4, rot: 0 });
+  const x = P.x + P.w / 2 + P.face * 18, y = P.y + P.h / 2 - 4, f = P.face;
+  if (w.id === 'star') shots.push({ kind: 'star', x, y, vx: f * CONFIG.throwSpeed, vy: -180, life: 1.4, rot: 0 });
+  if (w.id === 'bubble') shots.push({ kind: 'bubble', x, y, vx: f * 300, vy: -30, life: 2.2, rot: 0 });
+  if (w.id === 'wataame') shots.push({ kind: 'wataame', x, y: y - 6, vx: f * 260, vy: -480, life: 2, rot: 0 });
+  if (w.id === 'boomerang') shots.push({ kind: 'boomerang', x, y, vx: f * 720, vy: 0, life: 2.2, rot: 0, f, back: false });
 }
-function defeat(e) {
+function defeat(e, how = 'stomp') {
   e.alive = false; SFX.stomp();
-  popup(e.x + e.w / 2, e.y - 10, 'ぽよん', '#8C7BB0', 26);
-  for (let i = 0; i < 8; i++) particles.push({ x: e.x + e.w / 2, y: e.y, vx: Math.cos(i) * 160, vy: -Math.abs(Math.sin(i)) * 200, life: 0.5, c: '#FFFFFF' });
+  const ex = e.x + e.w / 2;
+  if (how === 'bubble') {   // しゃぼん玉につつまれて、ふわ〜っと空へ
+    popup(ex, e.y - 10, 'ふわ〜', '#4A9CD8', 26);
+    particles.push({ x: ex, y: e.y + e.h / 2, vx: 0, vy: -150, life: 1.2, c: '#9FD8FF', ring: 30, float: true });
+    return;
+  }
+  popup(ex, e.y - 10, how === 'wataame' ? 'ふわふわ' : 'ぽよん', how === 'wataame' ? '#FF6F9A' : '#8C7BB0', 26);
+  const c = how === 'wataame' ? '#FFD3E2' : '#FFFFFF';
+  for (let i = 0; i < 8; i++) particles.push({ x: ex, y: e.y, vx: Math.cos(i) * 160, vy: -Math.abs(Math.sin(i)) * 200, life: 0.5, c, dot: how === 'wataame' });
 }
 function selectCards() {
   const cw = 196, ch = 76, gap = 12, lw = 140;
@@ -389,7 +410,7 @@ function update(dt) {
   for (let i = popups.length - 1; i >= 0; i--) { popups[i].life -= dt; popups[i].y -= 40 * dt; if (popups[i].life <= 0) popups.splice(i, 1); }
   if (helpCloud) { helpCloud.t -= dt; if (helpCloud.t <= 0) helpCloud = null; }
   for (let i = particles.length - 1; i >= 0; i--) {
-    const p = particles[i]; p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 600 * dt;
+    const p = particles[i]; p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt; if (!p.float) p.vy += 600 * dt;
     if (p.life <= 0) particles.splice(i, 1);
   }
   if (fade > 0) fade = Math.max(0, fade - dt * 2);
@@ -540,9 +561,10 @@ function update(dt) {
     it.t += dt;
     if (!it.got && Math.abs(it.x - cx) < 40 && Math.abs(it.y - cy) < 44) {
       it.got = true; SFX.power();
-      popup(it.x, it.y - 50, P.power ? 'わたあめ！' : 'しんか！', '#FF6F9A', 36);
-      if (!P.power && !powerHint) { powerHint = true; popup(it.x, it.y - 10, 'なげる ボタンで お星さまを なげよう', '#4A8CC2', 24); }
-      P.power = true;
+      const w = weaponOf(it.kind);
+      popup(it.x, it.y - 50, P.power ? w.name + '！' : 'しんか！', '#E0A800', 36);
+      popup(it.x, it.y - 10, !powerHint ? `なげる ボタンで ${w.name}を なげよう` : `${w.name}を なげられるよ`, '#4A8CC2', 24);
+      powerHint = true; P.power = true; P.weapon = w.id; shots.length = 0;
       for (let i = 0; i < 24; i++) { const a = i / 24 * Math.PI * 2; particles.push({ x: it.x, y: it.y, vx: Math.cos(a) * 280, vy: Math.sin(a) * 280, life: 0.8, c: ['#FFB3CF', '#FFFFFF', '#FFD84D'][i % 3] }); }
     }
   }
@@ -550,9 +572,43 @@ function update(dt) {
   if (throwCool > 0) throwCool -= dt;
   for (let i = shots.length - 1; i >= 0; i--) {
     const sh = shots[i];
-    sh.life -= dt; sh.rot += dt * 14 * Math.sign(sh.vx);
+    sh.life -= dt; sh.rot += dt * 14 * Math.sign(sh.vx || 1);
+    const touch = (e, r) => e.alive && Math.abs(e.x + e.w / 2 - sh.x) < e.w / 2 + r && Math.abs(e.y + e.h / 2 - sh.y) < e.h / 2 + r;
+    if (sh.kind === 'bubble') {   // ふわふわ進む。壁は通りぬけない
+      sh.y += Math.sin(sh.life * 8) * 40 * dt + sh.vy * dt;
+      let gone = sh.life <= 0;
+      const nx = sh.x + sh.vx * dt;
+      if (solidAt(Math.floor((nx + Math.sign(sh.vx) * 16) / T), Math.floor(sh.y / T))) gone = true; else sh.x = nx;
+      for (const e of enemies) if (touch(e, 16)) { defeat(e, 'bubble'); gone = true; break; }
+      if (gone) { particles.push({ x: sh.x, y: sh.y, vx: 0, vy: -20, life: 0.25, c: '#9FD8FF', ring: 22, float: true }); shots.splice(i, 1); }
+      continue;
+    }
+    if (sh.kind === 'boomerang') {   // 行って もどる。壁も敵も通りぬけて、とちゅうの敵を ぜんぶ倒す
+      sh.vx -= sh.f * 1300 * dt;
+      if (!sh.back && Math.sign(sh.vx) !== sh.f) sh.back = true;
+      if (sh.back) { const ty = P.y + P.h / 2; sh.y += (ty - sh.y) * Math.min(1, dt * 6); }
+      sh.x += sh.vx * dt;
+      for (const e of enemies) if (touch(e, 14)) defeat(e);
+      if ((sh.back && Math.abs(sh.x - (P.x + P.w / 2)) < 30) || sh.life <= 0) shots.splice(i, 1);
+      continue;
+    }
+    if (sh.kind === 'wataame' && sh.burst !== undefined) {   // 落ちて ふわっと広がった わたあめ
+      sh.burst -= dt;
+      for (const e of enemies) if (touch(e, 60)) defeat(e, 'wataame');
+      if (sh.burst <= 0) shots.splice(i, 1);
+      continue;
+    }
     sh.vy = Math.min(sh.vy + CONFIG.gravity * 0.6 * dt, 900);
     let gone = sh.life <= 0;
+    if (sh.kind === 'wataame') {
+      sh.x += sh.vx * dt; sh.y += sh.vy * dt;
+      const hitE = enemies.some(e => touch(e, 10));
+      if (hitE || solidAt(Math.floor(sh.x / T), Math.floor((sh.y + 12) / T)) || sh.y > H * T + 100) {
+        sh.burst = 0.5; SFX.stomp();
+        for (let k = 0; k < 12; k++) particles.push({ x: sh.x, y: sh.y, vx: Math.cos(k / 2) * 200, vy: Math.sin(k / 2) * 200 - 60, life: 0.5, c: '#FFD3E2', dot: true });
+      } else if (gone) shots.splice(i, 1);
+      continue;
+    }
     const nx = sh.x + sh.vx * dt;
     if (solidAt(Math.floor((nx + Math.sign(sh.vx) * 12) / T), Math.floor(sh.y / T))) gone = true; else sh.x = nx;
     const ny = sh.y + sh.vy * dt;
@@ -956,7 +1012,40 @@ function drawDango(x, y, r, face, squash, blink, look = null) {
     star(x + Math.cos(a) * r * 1.45, y + Math.sin(a) * r * 0.75, r * 0.2, r * 0.09);
   }
 }
-// わたあめ（進化のアイテム）：ピンクのふわふわと、木の棒
+// しゃぼん玉・ブーメラン・武器のしるし・アイテム
+function drawBubble(x, y, r, strong) {
+  const g = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, r * 0.1, x, y, r);
+  g.addColorStop(0, 'rgba(255,255,255,.15)'); g.addColorStop(0.8, 'rgba(180,225,255,.25)'); g.addColorStop(1, 'rgba(150,205,255,.6)');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+  ctx.strokeStyle = strong ? 'rgba(120,190,240,.9)' : 'rgba(120,190,240,.7)'; ctx.lineWidth = 2; ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.beginPath(); ctx.ellipse(x - r * 0.35, y - r * 0.4, r * 0.25, r * 0.13, -0.6, 0, 7); ctx.fill();
+}
+function drawBoomerang(x, y, s, rot) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.scale(s, s);
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.strokeStyle = '#6FB86A'; ctx.lineWidth = 12;
+  ctx.beginPath(); ctx.moveTo(-16, 12); ctx.quadraticCurveTo(-2, -16, 0, -16); ctx.quadraticCurveTo(2, -16, 16, 12); ctx.stroke();
+  ctx.strokeStyle = '#B9E8A0'; ctx.lineWidth = 7;
+  ctx.beginPath(); ctx.moveTo(-16, 12); ctx.quadraticCurveTo(-2, -16, 0, -16); ctx.quadraticCurveTo(2, -16, 16, 12); ctx.stroke();
+  ctx.restore();
+}
+function weaponIcon(id, x, y, s = 1) {
+  if (id === 'bubble') { drawBubble(x - 5 * s, y + 2 * s, 13 * s, true); drawBubble(x + 11 * s, y - 8 * s, 7 * s, true); }
+  else if (id === 'wataame') drawWataame(x, y - 2 * s, 0.6 * s);
+  else if (id === 'boomerang') drawBoomerang(x, y + 3 * s, s, 0);
+  else { ctx.fillStyle = '#FFD84D'; star(x, y, 20 * s, 9 * s); ctx.strokeStyle = '#F2B632'; ctx.lineWidth = 2.5; ctx.stroke(); }
+}
+function drawItem(kind, x, y) {   // 光る玉の中に武器のしるし
+  const c = weaponOf(kind).color;
+  const glow = ctx.createRadialGradient(x, y, 8, x, y, 44);
+  glow.addColorStop(0, c + 'aa'); glow.addColorStop(1, c + '00');
+  ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(x, y, 44, 0, 7); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,.75)'; ctx.beginPath(); ctx.arc(x, y, 28, 0, 7); ctx.fill();
+  ctx.strokeStyle = c; ctx.lineWidth = 4; ctx.stroke();
+  weaponIcon(kind, x, y, 0.95);
+  ctx.fillStyle = '#FFFFFF'; star(x + 22 * Math.cos(time * 2), y - 22 * Math.abs(Math.sin(time * 2)), 5, 2);
+}
+// わたあめ：ピンクのふわふわと、木の棒
 function drawWataame(x, y, s = 1) {
   ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
   const glow = ctx.createRadialGradient(0, -6, 6, 0, -6, 46);
@@ -1039,7 +1128,7 @@ function drawButtons() {
   btn(b.left, holdLeft(), o => tri(o, -1));
   btn(b.right, holdRight(), o => tri(o, 1));
   if (P.power) btn(b.throw, throwCool > 0, o => {   // 進化している時だけ出る
-    ctx.fillStyle = '#FFD84D'; star(o.x, o.y - 10, 17, 8); ctx.strokeStyle = '#F2B632'; ctx.lineWidth = 2.5; ctx.stroke();
+    weaponIcon(P.weapon, o.x, o.y - 10, 0.8);
     ctx.fillStyle = 'rgba(60,90,130,.7)'; ctx.font = '700 19px "Hiragino Maru Gothic ProN",sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('なげる', o.x, o.y + 22);
   });
   btn(b.jump, holdJump(), o => { ctx.font = '700 30px "Hiragino Maru Gothic ProN",sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('ジャンプ', o.x, o.y); });
@@ -1122,7 +1211,7 @@ function draw() {
   drawTiles();
   for (const c of checkpoints) drawFlag(c, oy);
   drawStars();
-  for (const it of items) if (!it.got) drawWataame(it.x - camX, it.y + oy + Math.sin(it.t * 3) * 5);
+  for (const it of items) if (!it.got) drawItem(it.kind, it.x - camX, it.y + oy + Math.sin(it.t * 3) * 5);
   if (goal) {
     const hop = state === 'clear' ? Math.abs(Math.sin(clearT * 6)) * 24 : Math.abs(Math.sin(time * 2.5)) * 6;
     ctx.fillStyle = 'rgba(40,50,90,.16)'; ctx.beginPath(); ctx.ellipse(goal.x - camX + T / 2 + 40, goal.y + oy + T + 4, 30 - hop * 0.4, 6, 0, 0, 7); ctx.fill();
@@ -1130,13 +1219,19 @@ function draw() {
   }
   for (const e of enemies) drawEnemy(e, oy);
   for (const sh of shots) {
-    ctx.fillStyle = '#FFD84D'; star(sh.x - camX, sh.y + oy, 15, 7, sh.rot);
-    ctx.strokeStyle = '#F2B632'; ctx.lineWidth = 2.5; ctx.stroke();
+    const x = sh.x - camX, y = sh.y + oy;
+    if (sh.kind === 'bubble') drawBubble(x, y, 18, false);
+    else if (sh.kind === 'boomerang') drawBoomerang(x, y, 1, sh.rot);
+    else if (sh.kind === 'wataame') {
+      if (sh.burst !== undefined) { ctx.globalAlpha = Math.min(1, sh.burst * 3); ctx.fillStyle = '#FFD3E2'; puff(x - 50, y - 10, 0.6); ctx.globalAlpha = 1; }
+      else { ctx.save(); ctx.translate(x, y); ctx.rotate(sh.rot * 0.3); drawWataame(0, 0, 0.6); ctx.restore(); }
+    } else { ctx.fillStyle = '#FFD84D'; star(x, y, 15, 7, sh.rot); ctx.strokeStyle = '#F2B632'; ctx.lineWidth = 2.5; ctx.stroke(); }
   }
   if (helpCloud) { ctx.globalAlpha = Math.min(1, helpCloud.t * 2); ctx.fillStyle = '#FFFFFF'; puff(helpCloud.x - camX - 44, helpCloud.y + oy, 0.55); ctx.globalAlpha = 1; }
   for (const p of particles) {
     ctx.globalAlpha = Math.max(0, p.life * 2); ctx.fillStyle = p.c;
-    if (p.dot) { ctx.beginPath(); ctx.arc(p.x - camX, p.y + oy, 6, 0, 7); ctx.fill(); }
+    if (p.ring) { drawBubble(p.x - camX, p.y + oy, p.ring, p.life > 0.4); }
+    else if (p.dot) { ctx.beginPath(); ctx.arc(p.x - camX, p.y + oy, 6, 0, 7); ctx.fill(); }
     else if (p.big) { star(p.x - camX, p.y + oy, 18, 8); ctx.strokeStyle = '#F2B632'; ctx.lineWidth = 2.5; ctx.stroke(); }
     else star(p.x - camX, p.y + oy, 7, 3);
   }
@@ -1255,7 +1350,7 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 // 試験用の窓口
-window.__game = { get items() { return items; }, get shots() { return shots; }, throwStar, buttons, get hearts() { return hearts; }, set hearts(v) { hearts = v; }, get state() { return state; }, get openT() { return openT; }, get P() { return P; }, get got() { return got; }, get total() { return totalStars; },
+window.__game = { WEAPONS, get items() { return items; }, get shots() { return shots; }, throwStar, buttons, get hearts() { return hearts; }, set hearts(v) { hearts = v; }, get state() { return state; }, get openT() { return openT; }, get P() { return P; }, get got() { return got; }, get total() { return totalStars; },
   get grid() { return grid; }, get enemies() { return enemies; }, get goal() { return goal; }, startCourse, T, keys, pressJump,
   get courseIdx() { return courseIdx; }, get unlocked() { return unlocked; }, count: COURSES.length,
   get bigGot() { return bigGot; }, get bigStars() { return bigStars; }, get muted() { return muted; },

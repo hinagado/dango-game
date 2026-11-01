@@ -161,14 +161,33 @@ function installBot() {
 
     // 進化と武器：わたあめを取ると進化 → なげるボタンでお星さま → 敵を倒す。進化中に当たると元にもどる（ハートは減らない）
     const itemCounts = await page.evaluate(() => { const n = []; for (let i = 0; i < __game.count; i++) { __game.startCourse(i); n.push(__game.items.length); } __game.startCourse(0); return n; });
-    ok(itemCounts.every(n => n === 2), `どのコースにも わたあめが2つある (${itemCounts.join(',')})`);
+    ok(itemCounts.every(n => n === 3), `どのコースにも 進化のアイテムが3つある (${itemCounts.join(',')})`);
+    const kinds = await page.evaluate(() => { const k = new Set(); for (let i = 0; i < __game.count; i++) { __game.startCourse(i); __game.items.forEach(it => k.add(it.kind)); } __game.startCourse(0); return [...k]; });
+    ok(kinds.length === 4, `武器は4種類 出てくる (${kinds.join(',')})`);
+    // 武器ごとに：平らな所で右3マス先に敵 → なげる → 倒せる
+    for (const w of ['star', 'bubble', 'wataame', 'boomerang']) {
+      const r = await page.evaluate(async w => {
+        const g = __game; g.startCourse(0);
+        const e = g.enemies[0];
+        Object.assign(g.P, { x: 6 * 48 + 4, y: 14 * 48 - 40, vx: 0, vy: 0, inv: 5, face: 1, power: true, weapon: w });
+        Object.assign(e, { x: 9 * 48 + 4, y: 14 * 48 - 40, vx: 0 });
+        await new Promise(f => setTimeout(f, 80));
+        g.throwStar();
+        const n = g.shots.length;
+        await new Promise(f => setTimeout(f, 1500));
+        return { n, dead: !e.alive, left: g.shots.length };
+      }, w);
+      ok(r.n === 1 && r.dead, `武器「${w}」で敵を倒せる`);
+      if (w === 'boomerang') ok(r.left === 0, 'ブーメランは もどってきて消える');
+    }
+    await page.evaluate(() => { __game.startCourse(0); __game.P.power = false; });
     const pw = await page.evaluate(async () => {
       const g = __game, it = g.items[0];
       Object.assign(g.P, { x: it.x - 20, y: it.y - 20, vx: 0, vy: 0, inv: 0, power: false });
       await new Promise(f => setTimeout(f, 100));
       return { power: g.P.power, got: it.got };
     });
-    ok(pw.power && pw.got, 'わたあめを取ると進化する');
+    ok(pw.power && pw.got, 'アイテムを取ると進化する');
     await wait(300);
     await page.screenshot({ path: path.join(SHOTS, '3c_power.png') });
     const th = await page.evaluate(async () => {
