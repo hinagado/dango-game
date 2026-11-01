@@ -19,7 +19,8 @@ const ok = (cond, msg) => { console.log((cond ? '  OK  ' : '  NG  ') + msg); if 
     page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
     // iPad Air の横画面
     await page.setViewport({ width: 1180, height: 820, deviceScaleFactor: 1, hasTouch: true, isMobile: true, isLandscape: true });
-    await page.goto('file:///' + path.join(__dirname, '..', 'index.html').replace(/\\/g, '/'));
+    // GAME_URL を付けると公開ページで試す
+    await page.goto(process.env.GAME_URL || 'file:///' + path.join(__dirname, '..', 'index.html').replace(/\\/g, '/'));
     await new Promise(r => setTimeout(r, 600));
     await page.screenshot({ path: path.join(SHOTS, '1_title.png') });
     ok(await page.evaluate(() => __game.state) === 'title', 'タイトル画面が出る');
